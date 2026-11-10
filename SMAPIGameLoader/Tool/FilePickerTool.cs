@@ -65,8 +65,9 @@ internal static class FilePickerTool
         if (createDocumentTcs is { Task.IsCompleted: false })
             return Task.FromResult<Android.Net.Uri>(null);
 
-        createDocumentTcs = new TaskCompletionSource<Android.Net.Uri>();
+        // start first: if it throws (no Files app), no pending picker is left behind to block later exports
         SMAPIGameLoader.Launcher.LauncherActivity.Instance.StartActivityForResult(intent, CreateDocumentRequestCode);
+        createDocumentTcs = new TaskCompletionSource<Android.Net.Uri>();
         return createDocumentTcs.Task;
     }
 
