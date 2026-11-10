@@ -1,6 +1,4 @@
 ﻿using Android.App;
-using Android.Content;
-using Android.OS;
 using Android.Provider;
 using SMAPIGameLoader.Tool;
 using System;
@@ -110,7 +108,19 @@ internal static class SaveManager
     {
         try
         {
-            await Task.Run(ExportSavesInternal);
+            var savesDir = GetSavesDir();
+            if (!Directory.Exists(savesDir) || !Directory.EnumerateFileSystemEntries(savesDir).Any())
+            {
+                DialogTool.Show("Save Exporter", "No saves found.");
+                return;
+            }
+
+            var uri = await FilePickerTool.PickSaveLocation($"{SavesDirName}-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.zip", "application/zip");
+            if (uri is null)
+                return;
+
+            await Task.Run(() => WriteSavesZip(savesDir, uri));
+            DialogTool.Show("Save Exporter", "Saves exported.");
         }
         catch (Exception ex)
         {
@@ -118,51 +128,20 @@ internal static class SaveManager
         }
     }
 
-    const string ExportRelativeDir = "Download/SMAPI";
-
-    // ponytail: Android 10+ only (MediaStore.Downloads); Android 9 needs a WRITE_EXTERNAL_STORAGE path if anyone asks.
-    static void ExportSavesInternal()
+    static void WriteSavesZip(string savesDir, Android.Net.Uri uri)
     {
-        if (Build.VERSION.SdkInt < BuildVersionCodes.Q)
-        {
-            DialogTool.Show("Save Exporter", "Export needs Android 10 or newer.");
-            return;
-        }
-
-        var savesDir = GetSavesDir();
-        if (!Directory.Exists(savesDir) || !Directory.EnumerateFileSystemEntries(savesDir).Any())
-        {
-            DialogTool.Show("Save Exporter", "No saves found.");
-            return;
-        }
-
-        var fileName = $"{SavesDirName}-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.zip";
-        var values = new ContentValues();
-        values.Put(MediaStore.IMediaColumns.DisplayName, fileName);
-        values.Put(MediaStore.IMediaColumns.MimeType, "application/zip");
-        values.Put(MediaStore.IMediaColumns.RelativePath, ExportRelativeDir);
-        values.Put(MediaStore.IMediaColumns.IsPending, 1);
-
         var resolver = Application.Context.ContentResolver;
-        var uri = resolver.Insert(MediaStore.Downloads.ExternalContentUri, values)
-            ?? throw new IOException("Could not create the backup file in Downloads.");
         try
         {
-            using (var stream = resolver.OpenOutputStream(uri))
-                ZipFile.CreateFromDirectory(savesDir, stream, CompressionLevel.Optimal, includeBaseDirectory: true);
+            using var stream = resolver.OpenOutputStream(uri);
+            ZipFile.CreateFromDirectory(savesDir, stream, CompressionLevel.Optimal, includeBaseDirectory: true);
         }
         catch
         {
             // a half-written zip must not look like a valid backup
-            resolver.Delete(uri, null, null);
+            DocumentsContract.DeleteDocument(resolver, uri);
             throw;
         }
-
-        values.Clear();
-        values.Put(MediaStore.IMediaColumns.IsPending, 0);
-        resolver.Update(uri, values, null, null);
-
-        DialogTool.Show("Save Exporter", $"Saves exported to {ExportRelativeDir}/{fileName}");
     }
 
     const string EMERGENCY_SAVE_FileName = "EMERGENCY_SAVE";
