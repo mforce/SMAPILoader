@@ -75,7 +75,11 @@ internal static class FilePickerTool
         if (requestCode != CreateDocumentRequestCode)
             return;
 
-        createDocumentTcs?.TrySetResult(resultCode == Result.Ok ? data?.Data : null);
+        var uri = resultCode == Result.Ok ? data?.Data : null;
+        if (uri != null && !Android.Provider.DocumentsContract.IsDocumentUri(Application.Context, uri))
+            createDocumentTcs?.TrySetException(new System.IO.IOException($"The picker returned a location that is not a document: {uri}"));
+        else
+            createDocumentTcs?.TrySetResult(uri);
         createDocumentTcs = null;
     }
 }
