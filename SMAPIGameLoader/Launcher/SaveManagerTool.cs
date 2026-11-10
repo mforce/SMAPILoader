@@ -1,4 +1,8 @@
-﻿using SMAPIGameLoader.Tool;
+﻿using Android.App;
+using Android.Content;
+using Android.OS;
+using Android.Provider;
+using SMAPIGameLoader.Tool;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -6,7 +10,6 @@ using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Xamarin.Essentials;
 
 namespace SMAPIGameLoader.Launcher;
 
@@ -16,9 +19,18 @@ internal static class SaveManager
     public static string GetSavesDir() => Path.Combine(FileTool.ExternalFilesDir, SavesDirName);
     public static void OnClickImportSaveZip(object sender, EventArgs args)
     {
+        DialogTool.Show("Save Importer",
+            "Importing overwrites farms with the same name. Export your current saves first if you want to keep them.",
+            buttonOKName: "Import",
+            onClickYes: ImportSaveZip,
+            onClickCancel: () => { });
+    }
+
+    static async void ImportSaveZip()
+    {
         try
         {
-            ImportSaveZipInternal();
+            await ImportSaveZipInternal();
         }
         catch (Exception ex)
         {
@@ -28,15 +40,15 @@ internal static class SaveManager
 
     const string SaveGameInfo_FileName = "SaveGameInfo";
 
-    static async void ImportSaveZipInternal()
+    static async Task ImportSaveZipInternal()
     {
         var pick = await FilePickerTool.PickZipFile();
         if (pick is null)
             return;
 
-        if (pick.FileName is not "Saves.zip")
+        if (!pick.FileName.StartsWith(SavesDirName) || !pick.FileName.EndsWith(".zip"))
         {
-            DialogTool.Show("Save Importer Error", "Please pick file Saves.zip!!");
+            DialogTool.Show("Save Importer Error", "Please pick a Saves*.zip file, for example Saves.zip or an exported backup.");
             return;
         }
 
@@ -90,13 +102,63 @@ internal static class SaveManager
 
         DialogTool.Show("Save Importer", sbSaveImported.ToString());
     }
-    public static bool ImportSaveZip(FileResult pick)
+    public static void OnClickExportSaves(object sender, EventArgs args)
     {
-        if (pick.FileName.EndsWith(".zip"))
-            return false;
+        try
+        {
+            ExportSavesInternal();
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogTool.Show(ex);
+        }
+    }
 
+    const string ExportRelativeDir = "Download/SMAPI";
 
-        return true;
+    // ponytail: Android 10+ only (MediaStore.Downloads); Android 9 needs a WRITE_EXTERNAL_STORAGE path if anyone asks.
+    static void ExportSavesInternal()
+    {
+        if (Build.VERSION.SdkInt < BuildVersionCodes.Q)
+        {
+            DialogTool.Show("Save Exporter", "Export needs Android 10 or newer.");
+            return;
+        }
+
+        var savesDir = GetSavesDir();
+        if (!Directory.Exists(savesDir) || !Directory.EnumerateFileSystemEntries(savesDir).Any())
+        {
+            DialogTool.Show("Save Exporter", "No saves found.");
+            return;
+        }
+
+        var fileName = $"{SavesDirName}-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.zip";
+        var values = new ContentValues();
+        values.Put(MediaStore.IMediaColumns.DisplayName, fileName);
+        values.Put(MediaStore.IMediaColumns.MimeType, "application/zip");
+        values.Put(MediaStore.IMediaColumns.RelativePath, ExportRelativeDir);
+        values.Put(MediaStore.IMediaColumns.IsPending, 1);
+
+        var resolver = Application.Context.ContentResolver;
+        var uri = resolver.Insert(MediaStore.Downloads.ExternalContentUri, values)
+            ?? throw new IOException("Could not create the backup file in Downloads.");
+        try
+        {
+            using (var stream = resolver.OpenOutputStream(uri))
+                ZipFile.CreateFromDirectory(savesDir, stream, CompressionLevel.Optimal, includeBaseDirectory: true);
+        }
+        catch
+        {
+            // a half-written zip must not look like a valid backup
+            resolver.Delete(uri, null, null);
+            throw;
+        }
+
+        values.Clear();
+        values.Put(MediaStore.IMediaColumns.IsPending, 0);
+        resolver.Update(uri, values, null, null);
+
+        DialogTool.Show("Save Exporter", $"Saves exported to {ExportRelativeDir}/{fileName}");
     }
 
     const string EMERGENCY_SAVE_FileName = "EMERGENCY_SAVE";
