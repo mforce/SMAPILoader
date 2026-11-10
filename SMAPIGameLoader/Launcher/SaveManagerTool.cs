@@ -138,8 +138,8 @@ internal static class SaveManager
         }
         catch
         {
-            // a half-written zip must not look like a valid backup
-            DocumentsContract.DeleteDocument(resolver, uri);
+            // a half-written zip must not look like a valid backup; some providers refuse deletes, keep the original error
+            try { DocumentsContract.DeleteDocument(resolver, uri); } catch (Exception) { }
             throw;
         }
     }

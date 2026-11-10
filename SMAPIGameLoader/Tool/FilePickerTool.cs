@@ -61,7 +61,10 @@ internal static class FilePickerTool
         intent.SetType(mimeType);
         intent.PutExtra(Intent.ExtraTitle, fileName);
 
-        createDocumentTcs?.TrySetResult(null);
+        // a second tap while the picker is open must not start another picker
+        if (createDocumentTcs is { Task.IsCompleted: false })
+            return Task.FromResult<Android.Net.Uri>(null);
+
         createDocumentTcs = new TaskCompletionSource<Android.Net.Uri>();
         SMAPIGameLoader.Launcher.LauncherActivity.Instance.StartActivityForResult(intent, CreateDocumentRequestCode);
         return createDocumentTcs.Task;
