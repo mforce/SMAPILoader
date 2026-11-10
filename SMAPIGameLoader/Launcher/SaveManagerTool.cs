@@ -22,20 +22,18 @@ internal static class SaveManager
         DialogTool.Show("Save Importer",
             "Importing overwrites farms with the same name. Export your current saves first if you want to keep them.",
             buttonOKName: "Import",
-            onClickYes: ImportSaveZip,
+            onClickYes: async () =>
+            {
+                try
+                {
+                    await ImportSaveZipInternal();
+                }
+                catch (Exception ex)
+                {
+                    ErrorDialogTool.Show(ex);
+                }
+            },
             onClickCancel: () => { });
-    }
-
-    static async void ImportSaveZip()
-    {
-        try
-        {
-            await ImportSaveZipInternal();
-        }
-        catch (Exception ex)
-        {
-            ErrorDialogTool.Show(ex);
-        }
     }
 
     const string SaveGameInfo_FileName = "SaveGameInfo";
@@ -46,7 +44,8 @@ internal static class SaveManager
         if (pick is null)
             return;
 
-        if (!pick.FileName.StartsWith(SavesDirName) || !pick.FileName.EndsWith(".zip"))
+        if (!pick.FileName.StartsWith(SavesDirName, StringComparison.OrdinalIgnoreCase)
+            || !pick.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
             DialogTool.Show("Save Importer Error", "Please pick a Saves*.zip file, for example Saves.zip or an exported backup.");
             return;
@@ -58,6 +57,7 @@ internal static class SaveManager
         using (var zip = ZipFile.OpenRead(pick.FullPath))
         {
             var savesDirPath = GetSavesDir();
+            var savesDirRoot = Path.GetFullPath(savesDirPath) + Path.DirectorySeparatorChar;
             const string SkipEntrySavesName = SavesDirName + "/";
             var entires = zip.Entries.ToArray();
             foreach (var entry in entires)
@@ -74,7 +74,11 @@ internal static class SaveManager
                 if (firstDirName != null && firstDirName == SavesDirName)
                     currentEntryFilePath = currentEntryFilePath.Remove(0, SkipEntrySavesName.Length);
 
-                var extractFilePath = Path.Combine(savesDirPath, currentEntryFilePath);
+                var extractFilePath = Path.GetFullPath(Path.Combine(savesDirPath, currentEntryFilePath));
+                // a crafted zip ("../Mods/x.dll") must not write outside Saves
+                if (!extractFilePath.StartsWith(savesDirRoot, StringComparison.Ordinal))
+                    continue;
+
                 ZipFileTool.Extract(entry, extractFilePath);
                 var fileInfo = new FileInfo(extractFilePath);
                 if (fileInfo.Name == SaveGameInfo_FileName)
@@ -102,11 +106,11 @@ internal static class SaveManager
 
         DialogTool.Show("Save Importer", sbSaveImported.ToString());
     }
-    public static void OnClickExportSaves(object sender, EventArgs args)
+    public static async void OnClickExportSaves(object sender, EventArgs args)
     {
         try
         {
-            ExportSavesInternal();
+            await Task.Run(ExportSavesInternal);
         }
         catch (Exception ex)
         {
